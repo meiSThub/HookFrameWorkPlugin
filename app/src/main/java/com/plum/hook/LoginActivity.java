@@ -26,7 +26,8 @@ public class LoginActivity extends Activity {
         setContentView(R.layout.activity_login);
         name = (EditText) findViewById(R.id.name);
         password = (EditText) findViewById(R.id.password);
-        share = this.getSharedPreferences("david", MODE_PRIVATE);//实例化
+        //实例化
+        share = this.getSharedPreferences("david", MODE_PRIVATE);
         extraIntent = getIntent().getParcelableExtra("extraIntent");
         if (extraIntent != null) {
             String className = extraIntent.getComponent().getClassName();

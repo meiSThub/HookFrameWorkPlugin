@@ -4,15 +4,21 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
 import android.view.View;
 
+import java.io.File;
+import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+
+import dalvik.system.DexClassLoader;
+import dalvik.system.PathClassLoader;
 
 /**
  * Created by mei on 2018/10/14.
@@ -29,8 +35,6 @@ public class HookUtil {
      * Hook 系统的startActivity方法，增加我们自己的实现逻辑
      * <p>
      * 实现原理：Hook（反射）+动态代理
-     *
-     * @param context
      */
     public void hookStartActivity(Context context) {
         try {
@@ -107,8 +111,6 @@ public class HookUtil {
     /**
      * 在代理Activity通过了系统AMS的检查之后，回到当前的App启动对应的Activity的时候，再进行一次Hook操作。
      * 把要启动的Activity替换成我们真正要启动的Activity，还可以对一些代码控制，如页面做登陆前检查等。
-     *
-     * @param context
      */
     public void hookHookMh(Context context) {
         try {
@@ -140,6 +142,7 @@ public class HookUtil {
     class StartActivity implements InvocationHandler {
 
         private Object mIActivityManager;
+
         private Context mContext;
 
         public StartActivity(Object IActivityManager, Context context) {
@@ -192,6 +195,7 @@ public class HookUtil {
     class HandlerCallback implements Handler.Callback {
 
         private Handler mHandler;
+
         private Context mContext;
 
         public HandlerCallback(Handler handler, Context context) {
@@ -214,8 +218,6 @@ public class HookUtil {
 
         /**
          * 还原真正需要启动的Activity
-         *
-         * @param msg
          */
         private void handleLaunchActivity(Message msg) {
             // 拿到Message持有的obj对象
@@ -231,10 +233,7 @@ public class HookUtil {
                 if (oldIntent != null) {
                     // 在这里我们可以做集中式登陆
                     // 在这里我们还可以做一些免登陆白名单，让一些不需要登陆态的页面可以直接跳转
-                    if (isUserLogin(mContext)
-                            // 这里假设SceondActivity 不需要登录态，则直接跳转
-                            || oldIntent.getComponent().getClassName().equals(SceondActivity.class.getName())
-                            ) {
+                    if (isUserLogin(mContext)) {
                         // 如果用户已经登陆了，直接跳转到真正需要启动的页面
                         // 把原有的意图    放到realyIntent
                         realIntent.setComponent(oldIntent.getComponent());
@@ -256,13 +255,80 @@ public class HookUtil {
 
     /**
      * 用户是否登陆
-     *
-     * @param context
-     * @return
      */
     private boolean isUserLogin(Context context) {
         SharedPreferences share = context.getSharedPreferences("david",
                 Context.MODE_PRIVATE);
         return share.getBoolean("login", false);
     }
+
+    /**
+     * 初始化插件的dex文件，并与宿主app的dex文件进行合并,组成新的dex数组
+     * 注入插件的dex文件
+     */
+    public void injectPluginDex(Context context) {
+        // 插件下载的存储的位置
+        String apkPath = Environment.getExternalStorageDirectory() + File.separator + "plugin.apk";
+        // 插件被ClassLoader缓存的路径
+        String cachePath = context.getCacheDir().getAbsolutePath();
+        // 系统使用的ClassLoader
+        ClassLoader appClassLoader = context.getClassLoader();
+        // 插件使用的ClassLoader
+        DexClassLoader pluginClassLoader = new DexClassLoader(apkPath, cachePath, cachePath, appClassLoader);
+
+        try {
+            // 1.拿到插件ClassLoader的pathList对象
+            Class<?> pluginBaseClassLoaderClass = Class.forName("dalvik.system.BaseDexClassLoader");
+            Field pluginPathListField = pluginBaseClassLoaderClass.getDeclaredField("pathList");
+            pluginPathListField.setAccessible(true);
+            Object pluginPathList = pluginPathListField.get(pluginClassLoader);
+
+            // 2.拿到插件存放dex文件的数组对象：dexElements
+            Field pluginDexElementsField = pluginPathList.getClass().getDeclaredField("dexElements");
+            pluginDexElementsField.setAccessible(true);
+            // 得到插件的dexElements对象,是一个Element数组
+            Object pluginDexElements = pluginDexElementsField.get(pluginPathList);
+
+            // 3.拿到宿主app的pathList对象
+            Class<?> appClassLoaderClass = Class.forName("dalvik.system.BaseDexClassLoader");
+            Field appPathListField = appClassLoaderClass.getDeclaredField("pathList");
+            appPathListField.setAccessible(true);
+            Object appPathList = appPathListField.get(appClassLoader);
+
+            // 4.拿到宿主app 存放dex文件的数组对象：dexElements
+            Field appDexElementsField = appPathList.getClass().getDeclaredField("dexElements");
+            appDexElementsField.setAccessible(true);
+            Object appDexElements = appDexElementsField.get(appPathList);
+
+            // 5.合并宿主app和插件的dexElements数组
+            // 插件dexElements数组的长度
+            int pluginDexLength = Array.getLength(pluginDexElements);
+            // 宿主app的dexElements数组的长度
+            int appDexLength = Array.getLength(appDexElements);
+            // 宿主app的dexElements数组与插件dexElements数组合并之后的总长度
+            int length = pluginDexLength + appDexLength;
+            // 获取dexElements数组元素的Class类型
+            Class dexElementsItemType = appDexElements.getClass().getComponentType();
+
+            // 根据数组长度和元素类型，初始化一个新的dexElements数组，用于合并宿主app和插件的dexElements数组
+            Object newDexElements = Array.newInstance(dexElementsItemType, length);
+            // 合并宿主app和插件的dexElements数组
+            for (int i = 0; i < length; i++) {
+                if (i < pluginDexLength) {
+                    // 把插件的dexElements的元素取出，放入到新的dexElements数组中
+                    Array.set(newDexElements, i, Array.get(pluginDexElements, i));
+                } else {
+                    // 把宿主app的dexElements的元素取出，放入到新的dexElements数组中
+                    Array.set(newDexElements, i, Array.get(appDexElements, i - pluginDexLength));
+                }
+            }
+
+            // 6.把合并后的dexElements数组，设置给宿主app的pathList对象
+            appDexElementsField.set(appPathList, newDexElements);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
 }
