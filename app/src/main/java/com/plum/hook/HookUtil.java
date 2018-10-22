@@ -268,7 +268,7 @@ public class HookUtil {
      */
     public void injectPluginDex(Context context) {
         // 插件下载的存储的位置
-        String apkPath = Environment.getExternalStorageDirectory() + File.separator + "plugin.apk";
+        String apkPath = Environment.getExternalStorageDirectory().getAbsolutePath() + "/plugin.apk";
         // 插件被ClassLoader缓存的路径
         String cachePath = context.getCacheDir().getAbsolutePath();
         // 系统使用的ClassLoader

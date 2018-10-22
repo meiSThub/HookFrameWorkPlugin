@@ -22,7 +22,7 @@ public class MainActivity extends AppCompatActivity {
 
     public void jump2(View view) {
         Intent intent = new Intent();
-        intent.setComponent(new ComponentName("com.plum.plugin", "com.plum.plugin.SceondActivity"));
+        intent.setComponent(new ComponentName("com.plum.plugin", "com.plum.plugin.SecondActivity"));
 //        系统里面做了手脚   --》newIntent   msg--->obj-->intent
         startActivity(intent);
     }

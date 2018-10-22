@@ -1,6 +1,5 @@
 package com.plum.plugin;
 
-import android.app.Activity;
 import android.os.Bundle;
 import android.support.annotation.Nullable;
 
@@ -8,7 +7,7 @@ import android.support.annotation.Nullable;
  * Created by 48608 on 2018/1/12.
  */
 
-public class SceondActivity extends Activity {
+public class SecondActivity extends BaseActivity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);

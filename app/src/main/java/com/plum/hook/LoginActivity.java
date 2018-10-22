@@ -15,10 +15,16 @@ import android.widget.Toast;
  */
 
 public class LoginActivity extends Activity {
+
     EditText name;
+
     EditText password;
+
     private Intent extraIntent;
+
     SharedPreferences share;
+
+    private String className;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -30,7 +36,7 @@ public class LoginActivity extends Activity {
         share = this.getSharedPreferences("david", MODE_PRIVATE);
         extraIntent = getIntent().getParcelableExtra("extraIntent");
         if (extraIntent != null) {
-            String className = extraIntent.getComponent().getClassName();
+            className = extraIntent.getComponent().getClassName();
             ((TextView) findViewById(R.id.text)).setText(" 跳转界面：" + className);
         }
     }
