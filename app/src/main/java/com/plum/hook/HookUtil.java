@@ -4,6 +4,8 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
@@ -11,14 +13,15 @@ import android.util.Log;
 import android.view.View;
 
 import java.io.File;
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.Map;
 
 import dalvik.system.DexClassLoader;
-import dalvik.system.PathClassLoader;
 
 /**
  * Created by mei on 2018/10/14.
@@ -30,6 +33,12 @@ import dalvik.system.PathClassLoader;
  */
 
 public class HookUtil {
+
+    private Context mContext;
+
+    public HookUtil(Context context) {
+        mContext = context;
+    }
 
     /**
      * Hook 系统的startActivity方法，增加我们自己的实现逻辑
@@ -331,4 +340,107 @@ public class HookUtil {
         }
     }
 
+    /**
+     * 在ActivityThread中，有一个mPackages属性，类型是：ArrayMap<String, WeakReference<LoadedApk>>，
+     * 一个LoadedApk对应一个Apk，我们自己构造一个代表插件的LoadedApk对象，并放入到mPackages当中，
+     * 在启动一个activity的时候，会根据app的包名，得到对应的LoadedApk对象，这样就可以让系统使用我们插件的LoadedApk
+     * 对象了
+     *
+     * @param apkPath
+     */
+    public void putLoadedApk(String apkPath) {
+        //
+        try {
+            Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
+
+            // 1.获取sCurrentActivityThread对象
+            Field sCurrentActivityThreadField = activityThreadClass.getDeclaredField("sCurrentActivityThread");
+            sCurrentActivityThreadField.setAccessible(true);
+            Object sCurrentActivityThread = sCurrentActivityThreadField.get(null);
+
+            // 2.反射获取ActivityThread的mPackages字段
+            Field mPackagesField = activityThreadClass.getDeclaredField("mPackages");
+            mPackagesField.setAccessible(true);
+            Map mPackages = (Map) mPackagesField.get(sCurrentActivityThread);
+
+            // 3.找到：getPackageInfoNoCheck 方法
+            // 3-1.获取到CompatibilityInfo的class类型
+            Class<?> CompatibilityInfoClass = Class.forName("android.content.res.CompatibilityInfo");
+            // 3-2.反射得到 getPackageInfoNoCheck 方法
+            Method getPackageInfoNoCheckMethod = activityThreadClass.getDeclaredMethod("getPackageInfoNoCheck",
+                    ApplicationInfo.class, CompatibilityInfoClass);
+            getPackageInfoNoCheckMethod.setAccessible(true);
+
+            // 3-3.为getPackageInfoNoCheck方法，构造CompatibilityInfo类型的参数
+            // CompatibilityInfo类中有一个默认的对象：DEFAULT_COMPATIBILITY_INFO，获取之。
+            Field defaultCompatibilityInfoField = CompatibilityInfoClass.getDeclaredField("DEFAULT_COMPATIBILITY_INFO");
+            defaultCompatibilityInfoField.setAccessible(true);
+            Object defaultCompatibilityInfo = defaultCompatibilityInfoField.get(null);
+
+            // 3-4.为getPackageInfoNoCheck方法，构造ApplicationInfo类型的参数
+            ApplicationInfo applicationInfo = getApplicationInfo(mContext, apkPath);
+
+            // 3-5.调用getPackageInfoNoCheck方法
+            Object pluginLoadedApk = getPackageInfoNoCheckMethod.invoke(sCurrentActivityThread,
+                    applicationInfo, defaultCompatibilityInfo);
+
+            // 4.构造插件的ClassLoader，并设置给LoadedApk
+            String odexPath = Utils.getPluginOptDexDir(applicationInfo.packageName).getPath();
+            String libDir = Utils.getPluginLibDir(applicationInfo.packageName).getPath();
+
+            // 4-2.实例化插件自己的ClassLoader对象
+            ClassLoader classLoader = new CustomClassLoader(apkPath, odexPath, libDir, mContext.getClassLoader());
+            Field mClassLoaderField = pluginLoadedApk.getClass().getDeclaredField("mClassLoader");
+            mClassLoaderField.setAccessible(true);
+            // 4-3.把ClassLoader对象设置给LoadedApk对象
+            mClassLoaderField.set(pluginLoadedApk, classLoader);
+
+            // 5.把插件的LoadedApk对象，放入到mPackages当中
+            WeakReference reference = new WeakReference(pluginLoadedApk);
+            mPackages.put(applicationInfo.packageName, reference);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+    }
+
+    /**
+     * 根据插件的路径，构造一个插件的ApplicationInfo对象
+     *
+     * @param context
+     * @param apkPath
+     * @return
+     */
+    private ApplicationInfo getApplicationInfo(Context context, String apkPath) {
+
+        try {
+            // 1.调用PackageParser的parsePackage方法，得到Package对象
+            Class packageParserClass = Class.forName("android.content.pm.PackageParser");
+            Method parsePackageMethod = packageParserClass.getDeclaredMethod("parsePackage",
+                    File.class, int.class);
+            Object packageParser = packageParserClass.newInstance();
+            Object packageObj = parsePackageMethod.invoke(packageParser, new File(apkPath),
+                    PackageManager.GET_ACTIVITIES);
+
+            // 2.构建PackageUserState对象
+            Class<?> packageUserStateClass = Class.forName("android.content.pm.PackageUserState");
+            Object defaultUserState = packageUserStateClass.newInstance();
+
+            // 3.调用generateApplicationInfo  方法，生成  ApplicationInfo 对象
+            Method generateApplicationInfoMethod = packageParserClass.getDeclaredMethod("generateApplicationInfo",
+                    packageObj.getClass(), int.class, packageUserStateClass);
+            ApplicationInfo applicationInfo = (ApplicationInfo) generateApplicationInfoMethod.invoke(
+                    packageParser, packageObj, 0, defaultUserState);
+
+            // 4.为applicationInfo对象赋值
+            applicationInfo.sourceDir = apkPath;
+            applicationInfo.publicSourceDir = apkPath;
+
+            return applicationInfo;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
 }

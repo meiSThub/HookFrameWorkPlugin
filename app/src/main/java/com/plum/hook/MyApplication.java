@@ -1,6 +1,7 @@
 package com.plum.hook;
 
 import android.app.Application;
+import android.content.Context;
 import android.content.res.AssetManager;
 import android.content.res.Resources;
 import android.os.Environment;
@@ -13,20 +14,28 @@ import java.lang.reflect.Method;
 
 public class MyApplication extends Application {
 
+    private static Context sContext;
+
     private AssetManager mAssetManager;
 
     private Resources mResources;
 
     @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(base);
+        sContext = this;
+    }
+
+    @Override
     public void onCreate() {
         super.onCreate();
-        HookUtil hookUtil = new HookUtil();
+        HookUtil hookUtil = new HookUtil(this);
         hookUtil.hookStartActivity(this);
         hookUtil.hookHookMh(this);
         // 初始化插件的dex
-        hookUtil.injectPluginDex(this);
-
+//        hookUtil.injectPluginDex(this);
         String apkPath = Environment.getExternalStorageDirectory().getAbsolutePath() + "/plugin.apk";
+        hookUtil.putLoadedApk(apkPath);
 
         try {
             mAssetManager = AssetManager.class.newInstance();
@@ -57,5 +66,9 @@ public class MyApplication extends Application {
     @Override
     public Resources getResources() {
         return mResources == null ? super.getResources() : mResources;
+    }
+
+    public static Context getInstance() {
+        return sContext;
     }
 }
