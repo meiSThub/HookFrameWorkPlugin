@@ -4,6 +4,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Environment;
@@ -254,6 +255,13 @@ public class HookUtil {
                         // LoginActivity登陆成功之后，取出真实意图跳转
                         realIntent.putExtra("extraIntent", oldIntent);
                     }
+
+                    // 在启动activity之前，把packageName替换成插件的包名
+                    Field activityInfoField = obj.getClass().getDeclaredField("activityInfo");
+                    activityInfoField.setAccessible(true);
+                    ActivityInfo activityInfo = (ActivityInfo) activityInfoField.get(obj);
+                    activityInfo.applicationInfo.packageName = oldIntent.getPackage() == null ?
+                            oldIntent.getComponent().getPackageName() : oldIntent.getPackage();
                 }
 
             } catch (Exception e) {
